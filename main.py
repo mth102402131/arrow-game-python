@@ -21,62 +21,23 @@ LIGHT_BLUE = (230, 240, 255)
 
 UP, DOWN, LEFT, RIGHT = 0, 1, 2, 3
 
-# --- 关卡设计 (严格验证有解) ---
-# 规则: (row, col, direction)
-# 注意: row/col 是网格索引，从0开始
+# --- 关卡设计 ---
 LEVELS = [
-    # === 关卡 1: 绝对安全，互不阻挡 ===
-    # (2, 1) 右 -> 右边全空 -> OK
-    # (2, 6) 左 -> 左边全空 (因为(2,1)在很远的左边，中间隔着2,2~2,5) -> OK?
-    # 等等，(2,1)在(2,6)的左边。如果(2,6)向左看，会看到(2,1)吗？
-    # (2,6) 左: 检查 (2,5), (2,4), (2,3), (2,2), (2,1). 是的，会看到 (2,1)。
-    # 所以 (2,1) 和 (2,6) 还是互相阻挡！
-
-    # 【修正策略】：让箭头指向“空旷”的方向，或者背对背。
-    # 方案 A: 背对背
-    # (2, 3) 左, (2, 4) 右. -> (2,3)左边空, (2,4)右边空. OK!
-    # 方案 B: 同向
-    # (2, 1) 右, (2, 2) 右. -> (2,1)被(2,2)挡. (2,2)右边空.
-    #      必须先点 (2, 2), 再点 (2, 1).
-
-    # Level 1: 混合简单逻辑
+    # Level 1
     [
-        (2, 2, LEFT),  # 左边空 -> OK
-        (2, 5, RIGHT),  # 右边空 -> OK
-        (4, 3, DOWN),  # 下边空 -> OK
-        (1, 3, UP),  # 上边空 -> OK
-        (5, 5, RIGHT)  # 右边空 -> OK
+        (2, 2, LEFT), (2, 5, RIGHT), (4, 3, DOWN), (1, 3, UP), (5, 5, RIGHT)
     ],
-
-    # === 关卡 2: 需要顺序 (同向队列) ===
-    # 第一行: (1, 1)右, (1, 2)右, (1, 3)右.
-    # 必须从右往左点: (1,3)->OK, (1,2)->OK, (1,1)->OK.
-    # 第二列: (3, 1)下, (4, 1)下.
-    # 必须从下往上点: (4,1)->OK, (3,1)->OK.
+    # Level 2
     [
         (1, 1, RIGHT), (1, 2, RIGHT), (1, 3, RIGHT),
         (3, 1, DOWN), (4, 1, DOWN),
-        (2, 6, LEFT), (2, 5, LEFT)  # (2,6)左->(2,5)挡? 不，(2,5)在(2,6)左边。
-        # (2,6)左检查: (2,5)有箭头 -> 阻挡.
-        # (2,5)左检查: (2,4)空... -> OK.
-        # 所以必须先点 (2, 5), 再点 (2, 6).
+        (2, 6, LEFT), (2, 5, LEFT)
     ],
-
-    # === 关卡 3: 复杂依赖 ===
-    # (3, 2) 下. (5, 2) 上. -> 互相阻挡 (死锁).
-    # 必须引入破坏者.
-    # 让 (4, 2) 有一个向右的箭头? 不，那样 (3,2) 下方检查 (4,2) 有箭头 -> 阻挡.
-    # 让 (3, 2) 改为向右?
-    # 新设计:
-    # (2, 2) 右. (2, 5) 左. -> 互相阻挡.
-    # 必须先把中间的清掉? 中间没东西.
-    # 那就改成: (2, 2) 右, (2, 3) 右. -> (2,2)被挡. 先点(2,3).
-    # (4, 4) 下, (5, 4) 下. -> 先点(5,4).
+    # Level 3
     [
-        (2, 2, RIGHT), (2, 3, RIGHT),  # 先点 (2,3)
-        (4, 4, DOWN), (5, 4, DOWN),  # 先点 (5,4)
-        (1, 1, DOWN),  # 下边空? (2,1)空, (3,1)空... OK.
-        (6, 6, LEFT)  # 左边空? OK.
+        (2, 2, RIGHT), (2, 3, RIGHT),
+        (4, 4, DOWN), (5, 4, DOWN),
+        (1, 1, DOWN), (6, 6, LEFT)
     ]
 ]
 
@@ -141,7 +102,7 @@ class Game:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("一箭又一箭 - 最终修复版")
+        pygame.display.set_caption("一箭又一箭 - 重试修复版")
         self.clock = pygame.time.Clock()
 
         try:
@@ -156,11 +117,13 @@ class Game:
         self.arrows = []
         self.mistakes_left = MAX_MISTAKES
 
-        self.start_btn = pygame.Rect(300, 450, 200, 60)
-        self.restart_btn = pygame.Rect(680, 20, 100, 40)
-        self.next_btn = pygame.Rect(300, 450, 200, 60)
+        # 按钮定义
+        self.start_btn = pygame.Rect(300, 450, 200, 60)  # 用于开始、重试、返回主页
+        self.restart_btn = pygame.Rect(680, 20, 100, 40)  # 游戏中右上角的重置
+        self.next_btn = pygame.Rect(300, 450, 200, 60)  # 下一关
 
     def load_level(self, level_idx):
+        """加载关卡，重置箭头和失误数"""
         self.arrows = []
         if level_idx < len(LEVELS):
             for r, c, d in LEVELS[level_idx]:
@@ -171,13 +134,8 @@ class Game:
             self.state = "WIN"
 
     def check_path(self, arrow):
-        """
-        核心检测函数：检查箭头前方是否有阻挡
-        返回 True 表示可以飞出，False 表示被阻挡
-        """
         r, c = arrow.row, arrow.col
         dr, dc = 0, 0
-
         if arrow.direction == UP:
             dr = -1
         elif arrow.direction == DOWN:
@@ -188,30 +146,16 @@ class Game:
             dc = 1
 
         curr_r, curr_c = r + dr, c + dc
-
-        # 调试信息 (可选)
-        # print(f"Checking Arrow at ({r},{c}) Dir {arrow.direction}...")
-
-        # 沿着方向一步步检查
-        # 限制最大步数防止死循环，虽然逻辑上不会
         steps = 0
         while steps < 50:
-            # 检查当前位置是否有其他【活跃】的箭头
             for other in self.arrows:
                 if other.active and other.row == curr_r and other.col == curr_c:
-                    # print(f"  Blocked by arrow at ({curr_r}, {curr_c})")
                     return False
-
-            # 继续向前
             curr_r += dr
             curr_c += dc
             steps += 1
-
-            # 如果超出合理网格范围，视为飞出 (安全起见)
             if curr_r < -5 or curr_r > 20 or curr_c < -5 or curr_c > 20:
                 break
-
-        # print(f"  Path Clear!")
         return True
 
     def handle_click(self, pos):
@@ -221,6 +165,7 @@ class Game:
                 self.load_level(self.current_level_idx)
 
         elif self.state == "PLAYING":
+            # 游戏中点击右上角重置
             if self.restart_btn.collidepoint(pos):
                 self.load_level(self.current_level_idx)
                 return
@@ -241,15 +186,25 @@ class Game:
                 self.current_level_idx += 1
                 self.load_level(self.current_level_idx)
 
-        elif self.state in ["GAME_OVER", "WIN"]:
+        # ==========================================
+        # 【核心修改区域】
+        # ==========================================
+        elif self.state == "GAME_OVER":
+            # 失败后点击按钮 -> 重新加载当前关卡 (不改变 current_level_idx)
+            if self.start_btn.collidepoint(pos):
+                self.load_level(self.current_level_idx)
+
+        elif self.state == "WIN":
+            # 通关后点击按钮 -> 回到主菜单
             if self.start_btn.collidepoint(pos):
                 self.state = "START"
+                self.current_level_idx = 0
 
     def update(self):
         if self.state == "PLAYING":
             for arrow in self.arrows:
                 arrow.update()
-
+            # 检查是否所有箭头都消失了
             if sum(1 for a in self.arrows if a.active) == 0:
                 self.state = "LEVEL_COMPLETE"
 
@@ -263,33 +218,28 @@ class Game:
 
         if self.state == "START":
             self.draw_text("一箭又一箭", 280, 150)
-            self.draw_text("Python 作业 (最终版)", 270, 220, GRAY, self.small_font)
+            self.draw_text("Python 作业 (重试修复版)", 250, 220, GRAY, self.small_font)
             pygame.draw.rect(self.screen, GREEN, self.start_btn)
             self.draw_text("开始游戏", 330, 460, WHITE, self.small_font)
 
         elif self.state == "PLAYING":
-            # UI 背景
             pygame.draw.rect(self.screen, LIGHT_BLUE, (0, 0, SCREEN_WIDTH, UI_HEIGHT))
             pygame.draw.line(self.screen, BLACK, (0, UI_HEIGHT), (SCREEN_WIDTH, UI_HEIGHT), 2)
 
-            # UI 文字
             self.draw_text(f"关卡: {self.current_level_idx + 1}", 20, 20, BLACK, self.small_font)
             mistake_color = RED if self.mistakes_left == 1 else BLACK
             self.draw_text(f"剩余失误: {self.mistakes_left}", 20, 60, mistake_color, self.small_font)
             active_arrows = sum(1 for a in self.arrows if a.active)
             self.draw_text(f"剩余箭头: {active_arrows}", 250, 60, BLACK, self.small_font)
 
-            # 重置按钮
             pygame.draw.rect(self.screen, DARK_GRAY, self.restart_btn)
             self.draw_text("重置", 700, 25, WHITE, self.small_font)
 
-            # 网格
             for x in range(0, SCREEN_WIDTH, GRID_SIZE):
                 pygame.draw.line(self.screen, GRAY, (x, UI_HEIGHT), (x, SCREEN_HEIGHT))
             for y in range(UI_HEIGHT, SCREEN_HEIGHT, GRID_SIZE):
                 pygame.draw.line(self.screen, GRAY, (0, y), (SCREEN_WIDTH, y))
 
-            # 箭头
             for arrow in self.arrows:
                 arrow.draw(self.screen)
 
@@ -301,13 +251,15 @@ class Game:
         elif self.state == "GAME_OVER":
             self.draw_text("游戏失败", 300, 250, RED)
             self.draw_text("失误次数已耗尽", 280, 320, GRAY, self.small_font)
-            pygame.draw.rect(self.screen, DARK_GRAY, self.start_btn)
-            self.draw_text("返回主页", 330, 460, WHITE, self.small_font)
+
+            # 【修改】按钮颜色可以用红色或深灰，文字改为“重试本关”
+            pygame.draw.rect(self.screen, RED, self.start_btn)
+            self.draw_text("重试本关", 330, 460, WHITE, self.small_font)
 
         elif self.state == "WIN":
             self.draw_text("恭喜通关!", 280, 250, YELLOW)
-            self.draw_text("你完成了所有关卡", 260, 320, GRAY, self.small_font)
-            pygame.draw.rect(self.screen, DARK_GRAY, self.start_btn)
+            self.draw_text("所有关卡已完成", 280, 320, GRAY, self.small_font)
+            pygame.draw.rect(self.screen, GREEN, self.start_btn)
             self.draw_text("返回主页", 330, 460, WHITE, self.small_font)
 
         pygame.display.flip()
